@@ -12,6 +12,12 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+  mvc:
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      add-mappings: false
+
 server:
   port: ${LEDGER_PORT:8080}
 
