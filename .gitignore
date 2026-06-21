@@ -14,8 +14,10 @@ logs/
 .env
 .env.local
 .env.*.local
+set-env.ps1
 *.pem
 *.key
+*.pfx
 
 # IDE
 .idea/
