@@ -15,6 +15,7 @@ import dev.ledger.engine.repository.EntryRepository;
 import dev.ledger.engine.repository.TransactionRepository;
 import java.util.List;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -26,6 +27,9 @@ import org.springframework.util.StringUtils;
  */
 @Service
 public class LedgerService {
+
+    private static final int MAX_RETRIES = 5;
+    private static final long RETRY_BASE_BACKOFF_MS = 5;
 
     private final TransferProcessor processor;
     private final TransactionRepository transactions;
@@ -48,14 +52,33 @@ public class LedgerService {
                 return replay(existing.get());
             }
         }
+        // SERIALIZABLE can abort with a transient serialization/deadlock error under
+        // contention; the correct response is to retry the whole transaction.
+        int attempt = 0;
+        while (true) {
+            try {
+                PostResult result = processor.post(
+                        idempotencyKey, req.from(), req.to(), req.amountMinor(), req.currency());
+                return new TransferResponse(result.transactionId(), "POSTED", result.balances());
+            } catch (DuplicateKeyException raceLost) {
+                return transactions.findByIdempotencyKey(idempotencyKey)
+                        .map(this::replay)
+                        .orElseThrow(() -> raceLost);
+            } catch (TransientDataAccessException transient_) {
+                if (++attempt >= MAX_RETRIES) {
+                    throw transient_;
+                }
+                backoff(attempt);
+            }
+        }
+    }
+
+    private void backoff(int attempt) {
         try {
-            PostResult result = processor.post(
-                    idempotencyKey, req.from(), req.to(), req.amountMinor(), req.currency());
-            return new TransferResponse(result.transactionId(), "POSTED", result.balances());
-        } catch (DuplicateKeyException raceLost) {
-            return transactions.findByIdempotencyKey(idempotencyKey)
-                    .map(this::replay)
-                    .orElseThrow(() -> raceLost);
+            Thread.sleep(RETRY_BASE_BACKOFF_MS * attempt);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted during transfer retry backoff", e);
         }
     }
 

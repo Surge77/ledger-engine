@@ -27,9 +27,13 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The transactional heart. Each post runs in one SERIALIZABLE transaction with
- * accounts locked in ascending id order (deadlock-free). Both legs commit or
- * neither does; the DB's deferred trigger rejects any unbalanced transaction.
+ * The transactional heart. Each post runs in one transaction with both accounts
+ * locked FOR UPDATE in ascending id order (deadlock-free). The row lock is the
+ * per-account mutex: the balance is read and the legs inserted while it is held,
+ * so READ COMMITTED is sufficient and correct — and avoids the spurious
+ * serialization aborts that SERIALIZABLE raises on the balance predicate read
+ * under heavy contention. Both legs commit or neither does; the DB's deferred
+ * trigger rejects any unbalanced transaction.
  */
 @Component
 public class TransferProcessor {
@@ -49,7 +53,7 @@ public class TransferProcessor {
         this.objectMapper = objectMapper;
     }
 
-    @Transactional(isolation = Isolation.SERIALIZABLE)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PostResult post(String idempotencyKey, long from, long to, long amountMinor, String currency) {
         if (from == to) {
             throw new InvalidTransferException("from and to must differ");
@@ -85,7 +89,7 @@ public class TransferProcessor {
                 new BalanceResponse(to, entries.balanceOf(to), currency)));
     }
 
-    @Transactional(isolation = Isolation.SERIALIZABLE)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PostResult reverse(long originalTxId) {
         Transaction original = transactions.findById(originalTxId)
                 .orElseThrow(() -> new TransactionNotFoundException(originalTxId));
