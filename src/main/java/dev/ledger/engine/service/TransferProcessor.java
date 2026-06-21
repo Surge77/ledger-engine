@@ -21,7 +21,6 @@ import dev.ledger.engine.repository.TransactionRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.LongStream;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,9 +61,14 @@ public class TransferProcessor {
             throw new InvalidTransferException("amountMinor must be greater than 0");
         }
 
-        lockInOrder(from, to);
-        Account fromAcc = require(from);
-        Account toAcc = require(to);
+        // Lock both account rows in ascending id order, reusing the returned rows
+        // (no second fetch) — the lock is held for the rest of the transaction.
+        long lo = Math.min(from, to);
+        long hi = Math.max(from, to);
+        Account loAcc = lockAccount(lo);
+        Account hiAcc = lockAccount(hi);
+        Account fromAcc = from == lo ? loAcc : hiAcc;
+        Account toAcc = to == lo ? loAcc : hiAcc;
 
         if (!fromAcc.currency().equals(currency) || !toAcc.currency().equals(currency)) {
             throw new CurrencyMismatchException("transfer currency " + currency
@@ -75,6 +79,7 @@ public class TransferProcessor {
         if (fromBalance < amountMinor) {
             throw new InsufficientFundsException(from, fromBalance, amountMinor);
         }
+        long toBalance = entries.balanceOf(to);
 
         Transaction tx = transactions.insert(
                 idempotencyKey, TransactionType.TRANSFER, TransactionStatus.POSTED, null);
@@ -84,9 +89,11 @@ public class TransferProcessor {
                 "transactionId", tx.id(), "from", from, "to", to,
                 "amountMinor", amountMinor, "currency", currency)));
 
+        // Post-balances are deterministic under the row lock: no concurrent write
+        // to these accounts can interleave, so derive them instead of re-summing.
         return new PostResult(tx.id(), List.of(
-                new BalanceResponse(from, entries.balanceOf(from), currency),
-                new BalanceResponse(to, entries.balanceOf(to), currency)));
+                new BalanceResponse(from, fromBalance - amountMinor, currency),
+                new BalanceResponse(to, toBalance + amountMinor, currency)));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -101,9 +108,10 @@ public class TransferProcessor {
         }
 
         List<Entry> legs = entries.findByTransaction(originalTxId);
+        // Lock each distinct involved account once, ascending, keeping the rows.
+        Map<Long, Account> locked = new LinkedHashMap<>();
         legs.stream().map(Entry::accountId).distinct().sorted()
-                .forEach(id -> accounts.findByIdForUpdate(id)
-                        .orElseThrow(() -> new AccountNotFoundException(id)));
+                .forEach(id -> locked.put(id, lockAccount(id)));
 
         Transaction reversal = transactions.insert(
                 null, TransactionType.REVERSAL, TransactionStatus.POSTED, originalTxId);
@@ -115,26 +123,14 @@ public class TransferProcessor {
         outbox.insert(reversal.id(), "REVERSAL_POSTED",
                 payload(Map.of("transactionId", reversal.id(), "reverses", originalTxId)));
 
-        List<BalanceResponse> balances = legs.stream()
-                .map(Entry::accountId).distinct().sorted()
-                .map(id -> new BalanceResponse(id, entries.balanceOf(id), accountCurrency(id)))
+        List<BalanceResponse> balances = locked.keySet().stream()
+                .map(id -> new BalanceResponse(id, entries.balanceOf(id), locked.get(id).currency()))
                 .toList();
         return new PostResult(reversal.id(), balances);
     }
 
-    private void lockInOrder(long a, long b) {
-        long[] ordered = LongStream.of(Math.min(a, b), Math.max(a, b)).toArray();
-        for (long id : ordered) {
-            accounts.findByIdForUpdate(id).orElseThrow(() -> new AccountNotFoundException(id));
-        }
-    }
-
-    private Account require(long id) {
-        return accounts.findById(id).orElseThrow(() -> new AccountNotFoundException(id));
-    }
-
-    private String accountCurrency(long id) {
-        return require(id).currency();
+    private Account lockAccount(long id) {
+        return accounts.findByIdForUpdate(id).orElseThrow(() -> new AccountNotFoundException(id));
     }
 
     private String payload(Map<String, Object> data) {

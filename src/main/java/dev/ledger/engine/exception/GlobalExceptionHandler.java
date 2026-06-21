@@ -48,7 +48,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoHandlerFoundException.class)
     public ResponseEntity<ApiError> handleNotFound(NoHandlerFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(ApiError.of("NOT_FOUND", "no handler for " + ex.getRequestURL()));
+                .body(ApiError.of("NOT_FOUND", "no handler for the requested path"));
     }
 
     @ExceptionHandler(Exception.class)

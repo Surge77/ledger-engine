@@ -36,8 +36,9 @@ public class OutboxPoller {
             return 0;
         }
         for (OutboxEvent event : pending) {
-            log.info("outbox publish id={} type={} payload={}",
-                    event.id(), event.eventType(), event.payload());
+            // Payload carries account ids + amounts — keep it off INFO-level logs.
+            log.info("outbox publish id={} type={}", event.id(), event.eventType());
+            log.debug("outbox payload id={} {}", event.id(), event.payload());
         }
         outbox.markPublished(pending.stream().map(OutboxEvent::id).toList());
         return pending.size();

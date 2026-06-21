@@ -34,8 +34,11 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Only liveness checks are public. Everything else under /actuator
+        // (metrics, prometheus, info) requires the key — an exact match, never a
+        // prefix, so a newly exposed actuator endpoint can't silently go public.
         String path = request.getRequestURI();
-        return path.equals("/health") || path.startsWith("/actuator");
+        return path.equals("/health") || path.equals("/actuator/health");
     }
 
     @Override
