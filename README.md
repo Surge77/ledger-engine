@@ -8,7 +8,22 @@ amount, so the sum of all entries across the system is always **zero**. This is 
 payment infrastructure (Stripe, banks, brokerages, wallets) keeps money correct under
 crashes, retries, and concurrency.
 
-> Status: 🚧 in development. See [`PLAN.md`](./PLAN.md) for the full phased build spec.
+> Status: ✅ **V1 complete** — all phases built, 22 automated tests green, plus a
+> crash-recovery proof and a load benchmark. See [`PLAN.md`](./PLAN.md) for the build spec.
+
+## Headline numbers (measured locally)
+
+| Metric | Result |
+|--------|--------|
+| Σ of all entries across every operation | **0** (DB-enforced, deferred trigger) |
+| 100 concurrent transfers on one account | no lost update, no negative balance, Σ=0 |
+| Exactly-once under concurrent retries | duplicate `Idempotency-Key` → applied once |
+| Hard `kill -9` mid-load → restart | 158 transfers committed, **0** half-posted, 0 drift |
+| Throughput (disjoint accounts, 32 threads) | **~1,990 transfers/sec**, p99 **~28 ms** |
+| Throughput (single hot account, fully serialized) | ~330 transfers/sec, p99 ~178 ms |
+
+> Numbers from a local PostgreSQL 17 on Windows; reproduce with
+> `mvn -Dtest=LoadBenchmark test` and `pwsh scripts/crash-recovery-test.ps1`.
 
 ## Why this exists
 
@@ -42,41 +57,71 @@ Money is stored as integer **minor units** (paise/cents) — never floating poin
 | `GET`  | `/accounts/{id}/entries` | paginated history |
 | `POST` | `/transfers/{id}/reverse` | reverse a transfer |
 | `GET`  | `/admin/reconcile` | invariant + drift report |
-| `GET`  | `/health` | liveness |
+| `GET`  | `/health` | liveness (public) |
+
+Every endpoint except `/health` and `/actuator/health` requires the `X-Api-Key` header.
+Account ids are integers; money is an integer `amountMinor`.
 
 ```bash
+# create two accounts
+curl -X POST localhost:8080/accounts -H 'X-Api-Key: <key>' \
+  -H 'Content-Type: application/json' -d '{"name":"Alice","currency":"INR"}'
+
+# post an idempotent transfer
 curl -X POST localhost:8080/transfers \
-  -H 'Idempotency-Key: 8f1c…' -H 'Content-Type: application/json' \
-  -d '{"from":"acc_1","to":"acc_2","amount_minor":50000,"currency":"INR"}'
+  -H 'X-Api-Key: <key>' -H 'Idempotency-Key: 8f1c-…' \
+  -H 'Content-Type: application/json' \
+  -d '{"from":1,"to":2,"amountMinor":50000,"currency":"INR"}'
 ```
+
+## Design notes
+
+- **Atomicity & the invariant.** Each transfer is one DB transaction that inserts a
+  balanced pair of entries. A `DEFERRABLE INITIALLY DEFERRED` constraint trigger
+  re-checks `SUM(amount_minor)=0` per transaction at commit — the database itself
+  refuses to persist a half-transfer.
+- **Concurrency.** Both account rows are locked `FOR UPDATE` in ascending id order
+  (deadlock-free), and the balance is read while the lock is held. The row lock is the
+  per-account mutex, so `READ COMMITTED` is correct here — and it avoids the spurious
+  serialization aborts that `SERIALIZABLE` raises on the balance predicate read under
+  heavy contention. A bounded retry covers transient lock/deadlock errors.
+- **Idempotency.** A unique constraint on `idempotency_key` makes a replayed transfer a
+  no-op that returns the original transaction; a concurrent duplicate loses the insert
+  race and is served the stored result.
+- **Outbox.** Each post writes an `outbox` row in the same transaction; a `@Scheduled`
+  poller drains it (Kafka-ready). No event without a transaction, no transaction without
+  an event.
 
 ## Getting started
 
-Prerequisites: JDK 21, Maven, a local PostgreSQL.
+Prerequisites: JDK 21 and a local PostgreSQL (Maven via the bundled `./mvnw` wrapper).
 
 ```bash
 git clone https://github.com/Surge77/ledger-engine.git
 cd ledger-engine
-createdb ledger                       # or via pgAdmin
-cp .env.example .env                  # set DB url / credentials
-./mvnw spring-boot:run
+# create role + db (psql):  CREATE ROLE ledger LOGIN PASSWORD '…';
+#                           CREATE DATABASE ledger_engine OWNER ledger;
+cp .env.example .env                  # set LEDGER_DB_* and LEDGER_API_KEY, then export them
+./mvnw spring-boot:run                # Flyway applies the schema on startup
 curl localhost:8080/health
 ```
 
 ## Testing & verification
 
-This project is proven by tests, not a UI. The bar:
+Proven by tests, not a UI. The bar (all green):
 
 | Test | Proves |
 |------|--------|
-| Σ of all entries = 0 | double-entry invariant |
-| same `Idempotency-Key` twice → applied once | exactly-once |
-| 100 parallel transfers | no lost update, no negative balance |
-| kill mid-batch & restart | atomicity / crash-recovery |
-| reconciliation | 0 balance drift |
+| `TransferApiTest` — Σ of all entries = 0 | double-entry invariant |
+| `TransferApiTest` — same `Idempotency-Key` twice → applied once | exactly-once |
+| `ConcurrencyTest` — 100 parallel transfers | no lost update, no negative balance |
+| `AtomicityTest` + `scripts/crash-recovery-test.ps1` | atomicity / crash-recovery |
+| `OpsApiTest` — reconciliation | 0 balance drift |
 
 ```bash
-./mvnw test
+./mvnw verify                          # 22 tests + JaCoCo coverage (~90% line)
+mvn -Dtest=LoadBenchmark test          # throughput + p99 numbers
+pwsh scripts/crash-recovery-test.ps1   # hard-kill mid-load, prove no half-transfer
 ```
 
 ## Roadmap
