@@ -2,8 +2,12 @@ package dev.ledger.engine.controller;
 
 import dev.ledger.engine.domain.Account;
 import dev.ledger.engine.dto.AccountResponse;
+import dev.ledger.engine.dto.BalanceResponse;
 import dev.ledger.engine.dto.CreateAccountRequest;
+import dev.ledger.engine.dto.EntryResponse;
+import dev.ledger.engine.dto.PageResponse;
 import dev.ledger.engine.service.AccountService;
+import dev.ledger.engine.service.LedgerService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,16 +16,21 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/accounts")
 public class AccountController {
 
-    private final AccountService accountService;
+    private static final int MAX_PAGE_SIZE = 200;
 
-    public AccountController(AccountService accountService) {
+    private final AccountService accountService;
+    private final LedgerService ledger;
+
+    public AccountController(AccountService accountService, LedgerService ledger) {
         this.accountService = accountService;
+        this.ledger = ledger;
     }
 
     @PostMapping
@@ -33,5 +42,20 @@ public class AccountController {
     @GetMapping("/{id}")
     public AccountResponse get(@PathVariable long id) {
         return AccountResponse.from(accountService.get(id));
+    }
+
+    @GetMapping("/{id}/balance")
+    public BalanceResponse balance(@PathVariable long id) {
+        return ledger.balance(id);
+    }
+
+    @GetMapping("/{id}/entries")
+    public PageResponse<EntryResponse> entries(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        return ledger.entries(id, safePage, safeSize);
     }
 }
