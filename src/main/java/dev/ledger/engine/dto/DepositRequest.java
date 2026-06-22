@@ -5,12 +5,10 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 
-public record TransferRequest(
-        @NotNull(message = "from is required") Long from,
-        @NotNull(message = "to is required") Long to,
+/** Credits an account from its per-currency system account (money entering the ledger). */
+public record DepositRequest(
         @NotNull(message = "amountMinor is required")
         @Positive(message = "amountMinor must be greater than 0")
-        // Bounded well under Long.MAX_VALUE so accumulated balances cannot overflow.
         @Max(value = Money.MAX_AMOUNT_MINOR, message = "amountMinor exceeds the maximum allowed")
         Long amountMinor,
         @NotNull(message = "currency is required")

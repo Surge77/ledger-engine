@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ReconciliationService {
 
     private static final Logger log = LoggerFactory.getLogger(ReconciliationService.class);
+    private static final int MAX_DRIFT_REPORTED = 1000;
 
     private final JdbcTemplate jdbc;
     private final EntryRepository entries;
@@ -32,12 +33,17 @@ public class ReconciliationService {
     @Transactional(readOnly = true)
     public ReconcileResult reconcile() {
         long entriesSum = entries.totalSum();
+        // Bounded so a drift incident on a large table can't return an unbounded set.
         List<Long> unbalanced = jdbc.queryForList(
                 "SELECT transaction_id FROM entries GROUP BY transaction_id "
-                        + "HAVING SUM(amount_minor) <> 0 ORDER BY transaction_id",
-                Long.class);
+                        + "HAVING SUM(amount_minor) <> 0 ORDER BY transaction_id LIMIT ?",
+                Long.class, MAX_DRIFT_REPORTED + 1);
+        boolean truncated = unbalanced.size() > MAX_DRIFT_REPORTED;
+        if (truncated) {
+            unbalanced = unbalanced.subList(0, MAX_DRIFT_REPORTED);
+        }
         boolean ok = entriesSum == 0 && unbalanced.isEmpty();
-        return new ReconcileResult(ok, entriesSum, unbalanced, Instant.now());
+        return new ReconcileResult(ok, entriesSum, unbalanced, truncated, Instant.now());
     }
 
     @Scheduled(fixedDelayString = "${ledger.reconciliation.interval-ms}")

@@ -76,10 +76,21 @@ public class TransferProcessor {
         }
 
         long fromBalance = entries.balanceOf(from);
-        if (fromBalance < amountMinor) {
+        // System accounts are the external boundary money enters through and may run
+        // negative; every other account is overdraft-protected.
+        if (!fromAcc.isSystem() && fromBalance < amountMinor) {
             throw new InsufficientFundsException(from, fromBalance, amountMinor);
         }
         long toBalance = entries.balanceOf(to);
+
+        long fromAfter;
+        long toAfter;
+        try {
+            fromAfter = Math.subtractExact(fromBalance, amountMinor);
+            toAfter = Math.addExact(toBalance, amountMinor);
+        } catch (ArithmeticException overflow) {
+            throw new InvalidTransferException("transfer would overflow an account balance");
+        }
 
         Transaction tx = transactions.insert(
                 idempotencyKey, TransactionType.TRANSFER, TransactionStatus.POSTED, null);
@@ -92,8 +103,8 @@ public class TransferProcessor {
         // Post-balances are deterministic under the row lock: no concurrent write
         // to these accounts can interleave, so derive them instead of re-summing.
         return new PostResult(tx.id(), List.of(
-                new BalanceResponse(from, fromBalance - amountMinor, currency),
-                new BalanceResponse(to, toBalance + amountMinor, currency)));
+                new BalanceResponse(from, fromAfter, currency),
+                new BalanceResponse(to, toAfter, currency)));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

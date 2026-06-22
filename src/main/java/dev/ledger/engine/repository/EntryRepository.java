@@ -45,7 +45,7 @@ public class EntryRepository {
         return sum == null ? 0L : sum;
     }
 
-    public List<Entry> findByAccount(long accountId, int limit, int offset) {
+    public List<Entry> findByAccount(long accountId, int limit, long offset) {
         return jdbc.query(
                 "SELECT " + COLS + " FROM entries WHERE account_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
                 MAPPER, accountId, limit, offset);

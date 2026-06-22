@@ -4,16 +4,21 @@ import dev.ledger.engine.domain.Account;
 import dev.ledger.engine.domain.Entry;
 import dev.ledger.engine.domain.Transaction;
 import dev.ledger.engine.dto.BalanceResponse;
+import dev.ledger.engine.dto.DepositRequest;
+import dev.ledger.engine.dto.DepositResponse;
 import dev.ledger.engine.dto.EntryResponse;
 import dev.ledger.engine.dto.PageResponse;
 import dev.ledger.engine.dto.ReversalResponse;
 import dev.ledger.engine.dto.TransferRequest;
 import dev.ledger.engine.dto.TransferResponse;
 import dev.ledger.engine.exception.AccountNotFoundException;
+import dev.ledger.engine.exception.CurrencyMismatchException;
+import dev.ledger.engine.exception.InvalidTransferException;
 import dev.ledger.engine.repository.AccountRepository;
 import dev.ledger.engine.repository.EntryRepository;
 import dev.ledger.engine.repository.TransactionRepository;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
@@ -64,18 +69,50 @@ public class LedgerService {
                 return transactions.findByIdempotencyKey(idempotencyKey)
                         .map(this::replay)
                         .orElseThrow(() -> raceLost);
-            } catch (TransientDataAccessException transient_) {
+            } catch (TransientDataAccessException transientEx) {
                 if (++attempt >= MAX_RETRIES) {
-                    throw transient_;
+                    throw transientEx;
                 }
                 backoff(attempt);
             }
         }
     }
 
+    public DepositResponse deposit(String idempotencyKey, long accountId, DepositRequest req) {
+        Account target = requireAccount(accountId);
+        if (!target.currency().equals(req.currency())) {
+            throw new CurrencyMismatchException("deposit currency " + req.currency()
+                    + " must match account currency " + target.currency());
+        }
+        long systemId = systemAccountId(req.currency());
+        TransferResponse posted = transfer(idempotencyKey,
+                new TransferRequest(systemId, accountId, req.amountMinor(), req.currency()));
+        long balance = posted.balances().stream()
+                .filter(b -> b.account() == accountId)
+                .map(BalanceResponse::balanceMinor)
+                .findFirst()
+                .orElseGet(() -> entries.balanceOf(accountId));
+        return new DepositResponse(posted.transferId(), accountId, balance, req.currency(), posted.status());
+    }
+
+    /** Resolve the per-currency system account, creating it on first use. */
+    private long systemAccountId(String currency) {
+        return accounts.findSystemAccount(currency)
+                .map(Account::id)
+                .orElseGet(() -> {
+                    try {
+                        return accounts.insertSystem(currency).id();
+                    } catch (DuplicateKeyException raceLost) {
+                        return accounts.findSystemAccount(currency).orElseThrow().id();
+                    }
+                });
+    }
+
     private void backoff(int attempt) {
         try {
-            Thread.sleep(RETRY_BASE_BACKOFF_MS * attempt);
+            // Linear backoff with jitter so contending threads don't retry in lockstep.
+            long jitter = ThreadLocalRandom.current().nextLong(RETRY_BASE_BACKOFF_MS);
+            Thread.sleep(RETRY_BASE_BACKOFF_MS * attempt + jitter);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted during transfer retry backoff", e);
@@ -83,8 +120,22 @@ public class LedgerService {
     }
 
     public ReversalResponse reverse(long originalTransferId) {
-        PostResult result = processor.reverse(originalTransferId);
-        return new ReversalResponse(result.transactionId(), originalTransferId, "POSTED");
+        int attempt = 0;
+        while (true) {
+            try {
+                PostResult result = processor.reverse(originalTransferId);
+                return new ReversalResponse(result.transactionId(), originalTransferId, "POSTED");
+            } catch (DuplicateKeyException raceLost) {
+                // Lost the race for the unique reversal: another reversal already exists.
+                throw new InvalidTransferException(
+                        "transaction " + originalTransferId + " is already reversed");
+            } catch (TransientDataAccessException transientEx) {
+                if (++attempt >= MAX_RETRIES) {
+                    throw transientEx;
+                }
+                backoff(attempt);
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -96,7 +147,7 @@ public class LedgerService {
     @Transactional(readOnly = true)
     public PageResponse<EntryResponse> entries(long accountId, int page, int size) {
         requireAccount(accountId);
-        List<Entry> rows = entries.findByAccount(accountId, size + 1, page * size);
+        List<Entry> rows = entries.findByAccount(accountId, size + 1, (long) page * size);
         boolean hasMore = rows.size() > size;
         List<EntryResponse> items = rows.stream().limit(size).map(EntryResponse::from).toList();
         return new PageResponse<>(items, page, size, hasMore);
