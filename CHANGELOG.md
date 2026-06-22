@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is [SemVer](https://semver.org/).
 
+## [Unreleased]
+Hardening pass (review-driven) + the deposit boundary and API docs.
+
+### Added
+- **Deposit endpoint** `POST /accounts/{id}/deposit`: money enters the ledger by
+  debiting a per-currency **system account** (the only account allowed to run
+  negative) and crediting the target — idempotent, currency-checked, Σ stays zero.
+- **OpenAPI 3 / Swagger UI** (springdoc 2.6.0) at `/swagger-ui` and `/v3/api-docs`,
+  public and documenting the `X-Api-Key` scheme.
+- Bounds + overflow guards: `@Max` on transfer/deposit amounts, overflow-safe
+  post-balance arithmetic, `@Size` on the `Idempotency-Key` header, `long` pagination
+  offset (deep pages no longer 500).
+- Tests now 34 (added deposit, concurrent-reversal race, amount/header bounds,
+  deep-pagination, scheduled-reconcile).
+
+### Fixed
+- **Double-reversal race (critical):** a partial `UNIQUE` index on
+  `transactions.reverses_tx_id` makes at most one reversal per transaction
+  race-safe; `reverse()` now retries on transient errors and maps the lost race to
+  the same "already reversed" response.
+- Balance trigger now enforces `Σ(amount_minor)=0` **per currency**, not just in
+  aggregate (closes a cross-currency value-leak at the DB layer).
+- Bounded the `/admin/reconcile` drift query (`LIMIT` + `truncated` flag).
+
+### Changed
+- Retry backoff has jitter; virtual threads enabled (`spring.threads.virtual`).
+- Entry-currency uppercase CHECK and outbox `event_type` CHECK (parity with existing enums).
+
 ## [0.1.0] — 2026-06-22
 First working V1: a correct, concurrent, crash-safe double-entry ledger.
 

@@ -8,7 +8,7 @@ amount, so the sum of all entries across the system is always **zero**. This is 
 payment infrastructure (Stripe, banks, brokerages, wallets) keeps money correct under
 crashes, retries, and concurrency.
 
-> Status: ✅ **V1 complete** — all phases built, 26 automated tests green, plus a
+> Status: ✅ **V1 complete** — all phases built, 34 automated tests green, plus a
 > crash-recovery proof and a load benchmark. See [`PLAN.md`](./PLAN.md) for the build spec.
 
 ## Headline numbers (measured locally)
@@ -52,15 +52,21 @@ Money is stored as integer **minor units** (paise/cents) — never floating poin
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/accounts` | create an account |
+| `POST` | `/accounts/{id}/deposit` | credit an account (money entering the ledger; send `Idempotency-Key`) |
 | `POST` | `/transfers` | post a transfer (send `Idempotency-Key` header) |
 | `GET`  | `/accounts/{id}/balance` | current balance (derived) |
 | `GET`  | `/accounts/{id}/entries` | paginated history |
-| `POST` | `/transfers/{id}/reverse` | reverse a transfer |
+| `POST` | `/transfers/{id}/reverse` | reverse a transfer (at most once per transfer) |
 | `GET`  | `/admin/reconcile` | invariant + drift report |
 | `GET`  | `/health` | liveness (public) |
 
-Every endpoint except `/health` and `/actuator/health` requires the `X-Api-Key` header.
-Account ids are integers; money is an integer `amountMinor`.
+Interactive API docs (OpenAPI 3) are served at `/swagger-ui/index.html`, with the raw
+spec at `/v3/api-docs` — both public (they expose only the API shape, never data).
+
+Every other endpoint requires the `X-Api-Key` header. Account ids are integers; money
+is an integer `amountMinor` (minor units). A **deposit** is how funds enter the ledger:
+it debits a per-currency system account (which may run negative) and credits the target,
+so the system-wide sum stays zero.
 
 ```bash
 # create two accounts
@@ -119,7 +125,7 @@ Proven by tests, not a UI. The bar (all green):
 | `OpsApiTest` — reconciliation | 0 balance drift |
 
 ```bash
-./mvnw verify                          # 26 tests + JaCoCo coverage (~90% line)
+./mvnw verify                          # 34 tests + JaCoCo coverage (~90% line)
 mvn -Dtest=LoadBenchmark test          # throughput + p99 numbers
 pwsh scripts/crash-recovery-test.ps1   # hard-kill mid-load, prove no half-transfer
 ```
