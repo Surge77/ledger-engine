@@ -1,6 +1,11 @@
 spring:
   application:
     name: ledger-engine
+  threads:
+    # Virtual threads (Java 21): request handling and the retry-backoff sleep no
+    # longer pin platform threads under contention.
+    virtual:
+      enabled: true
   datasource:
     url: ${LEDGER_DB_URL}
     username: ${LEDGER_DB_USER}

@@ -1,6 +1,7 @@
 package dev.ledger.engine.exception;
 
 import dev.ledger.engine.dto.ApiError;
+import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 /** Single place that turns exceptions into the uniform {@link ApiError} envelope. */
@@ -31,6 +33,19 @@ public class GlobalExceptionHandler {
                 .toList();
         return ResponseEntity.badRequest()
                 .body(ApiError.of("VALIDATION_FAILED", "request validation failed", fields));
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiError> handleMethodValidation(HandlerMethodValidationException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiError.of("VALIDATION_FAILED", "request validation failed"));
+    }
+
+    // Thrown by @Validated method-parameter constraints (e.g. an over-long header).
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiError> handleConstraintViolation(ConstraintViolationException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiError.of("VALIDATION_FAILED", "request validation failed"));
     }
 
     @ExceptionHandler(MissingRequestHeaderException.class)
