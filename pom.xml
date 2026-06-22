@@ -54,6 +54,14 @@
         </dependency>
 
         <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <!-- 2.6.x is the line for Spring Boot 3.3 (Spring 6.1). 2.7.0+ requires
+                 Spring 6.2 / Boot 3.4 (references LiteWebJarsResourceResolver). -->
+            <version>2.6.0</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>

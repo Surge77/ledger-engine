@@ -34,11 +34,17 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // Only liveness checks are public. Everything else under /actuator
-        // (metrics, prometheus, info) requires the key — an exact match, never a
-        // prefix, so a newly exposed actuator endpoint can't silently go public.
+        // Only liveness checks and the API docs are public. Everything else under
+        // /actuator (metrics, prometheus, info) requires the key — an exact match,
+        // never a prefix, so a newly exposed actuator endpoint can't silently go
+        // public. The OpenAPI doc + Swagger UI expose only the API shape (which
+        // documents the X-Api-Key requirement), never ledger data.
         String path = request.getRequestURI();
-        return path.equals("/health") || path.equals("/actuator/health");
+        return path.equals("/health")
+                || path.equals("/actuator/health")
+                || path.equals("/v3/api-docs")
+                || path.startsWith("/v3/api-docs/")
+                || path.startsWith("/swagger-ui");
     }
 
     @Override
