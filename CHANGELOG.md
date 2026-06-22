@@ -20,9 +20,13 @@ First working V1: a correct, concurrent, crash-safe double-entry ledger.
 - Cross-cutting: API-key filter (constant-time), request-id logging filter, uniform
   error envelope, strict 404.
 - Scheduled reconciliation job + outbox poller.
-- Tests (22): accounts, transfer engine (invariant, idempotency, insufficient funds,
+- Tests (26): accounts, transfer engine (invariant, idempotency, insufficient funds,
   currency mismatch), reads/reversal, security/404, ops, error paths, atomicity rollback,
   100-thread concurrency. JaCoCo line coverage ~90%.
+- Scheduling (outbox poller + reconciliation) gated behind `ledger.scheduling.enabled`
+  (default on); disabled on the test classpath so background threads can't race a test's
+  shared database or `@MockBean` — removes a flaky-test source and keeps the suite
+  deterministic.
 - `scripts/crash-recovery-test.ps1` (hard-kill proof) and `LoadBenchmark` (throughput/p99).
 - Maven wrapper.
 

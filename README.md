@@ -8,7 +8,7 @@ amount, so the sum of all entries across the system is always **zero**. This is 
 payment infrastructure (Stripe, banks, brokerages, wallets) keeps money correct under
 crashes, retries, and concurrency.
 
-> Status: ✅ **V1 complete** — all phases built, 22 automated tests green, plus a
+> Status: ✅ **V1 complete** — all phases built, 26 automated tests green, plus a
 > crash-recovery proof and a load benchmark. See [`PLAN.md`](./PLAN.md) for the build spec.
 
 ## Headline numbers (measured locally)
@@ -119,7 +119,7 @@ Proven by tests, not a UI. The bar (all green):
 | `OpsApiTest` — reconciliation | 0 balance drift |
 
 ```bash
-./mvnw verify                          # 22 tests + JaCoCo coverage (~90% line)
+./mvnw verify                          # 26 tests + JaCoCo coverage (~90% line)
 mvn -Dtest=LoadBenchmark test          # throughput + p99 numbers
 pwsh scripts/crash-recovery-test.ps1   # hard-kill mid-load, prove no half-transfer
 ```
