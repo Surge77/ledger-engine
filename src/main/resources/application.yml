@@ -23,6 +23,8 @@ server:
 
 ledger:
   api-key: ${LEDGER_API_KEY}
+  scheduling:
+    enabled: ${LEDGER_SCHEDULING_ENABLED:true}
   outbox:
     poll-interval-ms: ${LEDGER_OUTBOX_POLL_MS:2000}
     batch-size: ${LEDGER_OUTBOX_BATCH:100}

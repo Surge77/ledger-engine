@@ -7,19 +7,16 @@ import dev.ledger.engine.dto.TransferRequest;
 import dev.ledger.engine.dto.TransferResponse;
 import dev.ledger.engine.repository.OutboxRepository;
 import dev.ledger.engine.service.OutboxPoller;
+import dev.ledger.engine.service.ReconciliationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.TestPropertySource;
 
-// Raise scheduler intervals so the background poller/reconciler can't race the assertions.
-@TestPropertySource(properties = {
-        "ledger.outbox.poll-interval-ms=600000",
-        "ledger.reconciliation.interval-ms=600000"
-})
+// The scheduler is disabled on the test classpath (ledger.scheduling.enabled=false),
+// so these tests drive the poller and reconciliation directly and deterministically.
 class OpsApiTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -27,6 +24,9 @@ class OpsApiTest extends AbstractIntegrationTest {
 
     @Autowired
     private OutboxRepository outboxRepository;
+
+    @Autowired
+    private ReconciliationService reconciliation;
 
     private void transfer(long from, long to, long amount) {
         rest.postForEntity(url("/transfers"),
@@ -66,5 +66,18 @@ class OpsApiTest extends AbstractIntegrationTest {
 
         assertThat(published).isEqualTo(1);
         assertThat(outboxRepository.unpublishedCount()).isZero();
+    }
+
+    @Test
+    void scheduledReconcileRunsCleanOnBalancedLedger() {
+        long alice = createAccount("Alice", "INR");
+        long bob = createAccount("Bob", "INR");
+        deposit(alice, 5_000, "INR");
+        transfer(alice, bob, 1_000);
+
+        // The scheduled entrypoint must run without error against a balanced ledger.
+        reconciliation.scheduledReconcile();
+
+        assertThat(reconciliation.reconcile().invariantOk()).isTrue();
     }
 }
