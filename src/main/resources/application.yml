@@ -44,6 +44,11 @@ management:
   endpoint:
     health:
       show-details: never
+  metrics:
+    distribution:
+      # Publish histogram buckets so Grafana can compute p95/p99 via histogram_quantile.
+      percentiles-histogram:
+        http.server.requests: true
 
 logging:
   pattern:
