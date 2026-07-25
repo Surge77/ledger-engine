@@ -17,6 +17,19 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+  kafka:
+    bootstrap-servers: ${LEDGER_KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # The outbox payload column is already JSON — send it as-is rather than
+      # serializing a String into a nested JSON string.
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Durability over latency: the outbox exists so a committed ledger post is
+      # never lost, and an unacknowledged send would defeat that.
+      acks: all
+      properties:
+        enable.idempotence: true
+
   mvc:
     throw-exception-if-no-handler-found: true
   web:
@@ -33,6 +46,9 @@ ledger:
   outbox:
     poll-interval-ms: ${LEDGER_OUTBOX_POLL_MS:2000}
     batch-size: ${LEDGER_OUTBOX_BATCH:100}
+    # 'log' needs no broker; set to 'kafka' to publish to ledger.transfers.posted
+    publisher: ${LEDGER_OUTBOX_PUBLISHER:log}
+    send-timeout-ms: ${LEDGER_OUTBOX_SEND_TIMEOUT_MS:5000}
   reconciliation:
     interval-ms: ${LEDGER_RECON_INTERVAL_MS:60000}
 

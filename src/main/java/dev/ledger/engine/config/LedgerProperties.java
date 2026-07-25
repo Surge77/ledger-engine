@@ -2,6 +2,7 @@ package dev.ledger.engine.config;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -16,7 +17,16 @@ public record LedgerProperties(
         Outbox outbox,
         Reconciliation reconciliation) {
 
-    public record Outbox(@Min(100) long pollIntervalMs, @Min(1) int batchSize) {
+    /**
+     * @param publisher how drained events are shipped: {@code log} (default, no broker
+     *                  required) or {@code kafka}
+     */
+    public record Outbox(
+            @Min(100) long pollIntervalMs,
+            @Min(1) int batchSize,
+            @Pattern(regexp = "log|kafka", message = "ledger.outbox.publisher must be 'log' or 'kafka'")
+            String publisher,
+            @Min(100) long sendTimeoutMs) {
     }
 
     public record Reconciliation(@Min(1000) long intervalMs) {
