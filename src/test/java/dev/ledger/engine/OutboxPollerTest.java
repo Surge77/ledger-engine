@@ -13,8 +13,11 @@ import dev.ledger.engine.config.LedgerProperties;
 import dev.ledger.engine.domain.OutboxEvent;
 import dev.ledger.engine.messaging.OutboxPublishException;
 import dev.ledger.engine.messaging.OutboxPublisher;
+import dev.ledger.engine.observability.LedgerMetrics;
 import dev.ledger.engine.repository.OutboxRepository;
 import dev.ledger.engine.service.OutboxPoller;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,6 +33,7 @@ class OutboxPollerTest {
 
     private OutboxRepository outbox;
     private OutboxPublisher publisher;
+    private MeterRegistry registry;
     private OutboxPoller poller;
 
     private static OutboxEvent event(long id) {
@@ -40,11 +44,16 @@ class OutboxPollerTest {
     void setUp() {
         outbox = mock(OutboxRepository.class);
         publisher = mock(OutboxPublisher.class);
+        registry = new SimpleMeterRegistry();
         LedgerProperties properties = new LedgerProperties(
                 "test-key",
                 new LedgerProperties.Outbox(2000, 100, "log", 5000),
                 new LedgerProperties.Reconciliation(60000));
-        poller = new OutboxPoller(outbox, publisher, properties);
+        poller = new OutboxPoller(outbox, publisher, new LedgerMetrics(registry, outbox), properties);
+    }
+
+    private double counter(String name) {
+        return registry.get(name).counter().count();
     }
 
     @Test
@@ -87,6 +96,20 @@ class OutboxPollerTest {
         ArgumentCaptor<List<Long>> marked = ArgumentCaptor.forClass(List.class);
         verify(outbox).markPublished(marked.capture());
         assertThat(marked.getValue()).containsExactly(1L);
+    }
+
+    @Test
+    @DisplayName("counts only confirmed sends, and counts the failure that stopped the batch")
+    void publishBatch_partialFailure_metricsReflectRealityNotIntent() {
+        when(outbox.fetchUnpublished(anyInt()))
+                .thenReturn(List.of(event(1), event(2), event(3)));
+        doThrow(new OutboxPublishException(2L, new RuntimeException("timeout")))
+                .when(publisher).publish(event(2));
+
+        poller.publishBatch();
+
+        assertThat(counter("ledger.outbox.published")).isEqualTo(1.0);
+        assertThat(counter("ledger.outbox.publish.failures")).isEqualTo(1.0);
     }
 
     @Test

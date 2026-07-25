@@ -113,6 +113,33 @@ published only on send success; existing tests still green.
 
 ---
 
+---
+
+## Delivery status (2026-07-26)
+
+| Phase | Code | Verified |
+|---|---|---|
+| 0 — Kafka publish | done | unit (5/5); integration suite not run — no local Postgres |
+| 1 — Consumer + ACL | done | **76/76 unit, green** |
+| 2 — Tracing | done | compiles; **propagation unverified — needs a live broker** |
+| 3 — Metrics + logs | done | unit (metric assertions green) |
+| 4 — SLOs + alerts | done | rules authored; **never evaluated by a live Prometheus** |
+| 5 — Load + fault injection | scripted | **not executed** — needs the full stack |
+
+**Tracing was implemented with the Micrometer bridge, not the OTel Java agent.** The
+agent would attach at runtime and could not be compiled or asserted; the bridge makes
+propagation ordinary wiring. Two settings carry the cross-service trace:
+`spring.kafka.template.observation-enabled` on the producer, and — critically —
+`setObservationEnabled(true)` on fraud-engine's hand-built
+`ledgerTransferListenerContainerFactory`, which does **not** inherit the
+`spring.kafka.listener.observation-enabled` property. Missing that one line produces
+two orphan traces and no error.
+
+**What no amount of local work can establish:** that the traceparent header actually
+survives the Kafka hop. That requires a running broker. Until someone runs
+`scripts/fault-injection.md` against the live stack, treat Phase 2 as written but
+unproven.
+
 ## Risks
 
 - **Silent trace-context loss over Kafka** — must be asserted in a test, not eyeballed.

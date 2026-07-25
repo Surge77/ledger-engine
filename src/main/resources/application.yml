@@ -29,6 +29,11 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+    template:
+      # Emits a producer span and writes W3C traceparent into the record headers.
+      # Without this the trace ends at the ledger and fraud-engine starts a new
+      # one -- two orphan traces, and no error to tell you.
+      observation-enabled: true
 
   mvc:
     throw-exception-if-no-handler-found: true
@@ -65,9 +70,22 @@ management:
       # Publish histogram buckets so Grafana can compute p95/p99 via histogram_quantile.
       percentiles-histogram:
         http.server.requests: true
+        ledger.transfer.duration: true
+    tags:
+      # Lets one Prometheus/Grafana stack scrape both services and tell them apart.
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      # Full sampling: this is a demonstrable platform, not a high-volume production
+      # system, and a partial sample makes an injected fault easy to miss entirely.
+      probability: ${LEDGER_TRACE_SAMPLE:1.0}
+  otlp:
+    tracing:
+      endpoint: ${LEDGER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 logging:
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId}] %logger{36} - %msg%n"
+    # trace/span ids make a log line joinable to its Grafana waterfall.
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId}] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"
   level:
     dev.ledger: INFO

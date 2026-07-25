@@ -3,6 +3,7 @@ package dev.ledger.engine.service;
 import dev.ledger.engine.config.LedgerProperties;
 import dev.ledger.engine.domain.OutboxEvent;
 import dev.ledger.engine.messaging.OutboxPublisher;
+import dev.ledger.engine.observability.LedgerMetrics;
 import dev.ledger.engine.repository.OutboxRepository;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,12 +29,14 @@ public class OutboxPoller {
 
     private final OutboxRepository outbox;
     private final OutboxPublisher publisher;
+    private final LedgerMetrics metrics;
     private final int batchSize;
 
-    public OutboxPoller(
-            OutboxRepository outbox, OutboxPublisher publisher, LedgerProperties properties) {
+    public OutboxPoller(OutboxRepository outbox, OutboxPublisher publisher,
+                        LedgerMetrics metrics, LedgerProperties properties) {
         this.outbox = outbox;
         this.publisher = publisher;
+        this.metrics = metrics;
         this.batchSize = properties.outbox().batchSize();
     }
 
@@ -54,6 +57,7 @@ public class OutboxPoller {
                 publisher.publish(event);
                 sent.add(event.id());
             } catch (RuntimeException e) {
+                metrics.outboxPublishFailed();
                 log.warn("outbox publish failed id={} — {} of {} sent, rest retried next poll",
                         event.id(), sent.size(), pending.size(), e);
                 break;
@@ -61,6 +65,7 @@ public class OutboxPoller {
         }
 
         outbox.markPublished(sent);
+        metrics.outboxPublished(sent.size());
         return sent.size();
     }
 }
