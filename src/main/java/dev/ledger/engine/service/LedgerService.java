@@ -10,6 +10,7 @@ import dev.ledger.engine.dto.EntryResponse;
 import dev.ledger.engine.dto.PageResponse;
 import dev.ledger.engine.dto.ReversalResponse;
 import dev.ledger.engine.dto.TransferRequest;
+import dev.ledger.engine.observability.LedgerMetrics;
 import dev.ledger.engine.dto.TransferResponse;
 import dev.ledger.engine.exception.AccountNotFoundException;
 import dev.ledger.engine.exception.CurrencyMismatchException;
@@ -40,13 +41,15 @@ public class LedgerService {
     private final TransactionRepository transactions;
     private final EntryRepository entries;
     private final AccountRepository accounts;
+    private final LedgerMetrics metrics;
 
     public LedgerService(TransferProcessor processor, TransactionRepository transactions,
-            EntryRepository entries, AccountRepository accounts) {
+            EntryRepository entries, AccountRepository accounts, LedgerMetrics metrics) {
         this.processor = processor;
         this.transactions = transactions;
         this.entries = entries;
         this.accounts = accounts;
+        this.metrics = metrics;
     }
 
     public TransferResponse transfer(String idempotencyKey, TransferRequest req) {
@@ -64,6 +67,10 @@ public class LedgerService {
             try {
                 PostResult result = processor.post(
                         idempotencyKey, req.from(), req.to(), req.amountMinor(), req.currency());
+                // Counted here, not on the replay path: an idempotent retry returns the
+                // original transfer without moving value, so counting it would inflate
+                // posted-transfer volume with duplicates.
+                metrics.transferPosted();
                 return new TransferResponse(result.transactionId(), "POSTED", result.balances());
             } catch (DuplicateKeyException raceLost) {
                 return transactions.findByIdempotencyKey(idempotencyKey)

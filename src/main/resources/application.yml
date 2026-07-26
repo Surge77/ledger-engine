@@ -69,8 +69,10 @@ management:
     distribution:
       # Publish histogram buckets so Grafana can compute p95/p99 via histogram_quantile.
       percentiles-histogram:
+        # http.server.requests already carries per-URI latency, which is what the
+        # write-latency SLO is computed from. A separate transfer timer would be a
+        # second source of truth for the same number.
         http.server.requests: true
-        ledger.transfer.duration: true
     tags:
       # Lets one Prometheus/Grafana stack scrape both services and tell them apart.
       application: ${spring.application.name}
