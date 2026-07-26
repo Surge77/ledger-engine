@@ -87,6 +87,20 @@
             <version>2.6.0</version>
         </dependency>
 
+        <!-- In-JVM Kafka broker: lets the publish path and W3C trace propagation be
+             tested for real without Docker, which is otherwise unavailable here. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- OTel SDK (not just the API) so the test can build the same tracer the
+             app runs, rather than asserting against a stub propagator. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
