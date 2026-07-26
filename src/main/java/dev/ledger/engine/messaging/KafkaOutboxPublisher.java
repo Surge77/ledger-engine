@@ -46,6 +46,12 @@ public class KafkaOutboxPublisher implements OutboxPublisher {
             throw new OutboxPublishException(event.id(), e);
         } catch (ExecutionException | TimeoutException e) {
             throw new OutboxPublishException(event.id(), e);
+        } catch (RuntimeException e) {
+            // send() can fail synchronously — an unreachable broker surfaces as
+            // KafkaException from send() itself, never reaching the future. Without
+            // this branch that escapes untranslated and the event id is lost from the
+            // failure, breaking the contract this interface documents.
+            throw new OutboxPublishException(event.id(), e);
         }
     }
 }

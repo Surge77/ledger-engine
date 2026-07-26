@@ -158,10 +158,33 @@ Remaining name assumptions still unverified against a live `/actuator/prometheus
 documented naming conversion, but conversion rules are not the same as observed
 output — confirm them on first boot.
 
-**What no amount of local work can establish:** that the traceparent header actually
-survives the Kafka hop. That requires a running broker. Until someone runs
-`scripts/fault-injection.md` against the live stack, treat Phase 2 as written but
-unproven.
+### Verification breakthrough (2026-07-26)
+
+Two blockers previously recorded as fatal turned out not to be:
+
+- **Kafka needs no Docker.** `spring-kafka-test` runs an in-JVM KRaft broker, so the
+  publish path *and* W3C trace propagation are testable here.
+  `KafkaOutboxPublisherTest` now asserts a `traceparent` header is written into the
+  record using the real OTel bridge — not a stub propagator, which would only prove
+  the stub works. Phase 2's producer half is **proven**, not assumed.
+- **Postgres needs no service start.** `pg_ctl -D "<install>/data" start` runs it as a
+  user process without elevation. The full ledger suite — **44/44 green**, including
+  `OpsApiTest.outboxPollerPublishesPendingEvents`, which exercises the changed drain
+  path — has now run.
+
+Two real defects were found only by testing against a live broker:
+
+1. `KafkaTemplate.send()` fails **synchronously** with `KafkaException` when the
+   broker is unreachable — it never reaches the future. The publisher caught only
+   `ExecutionException`/`TimeoutException`, so that escaped untranslated and lost the
+   event id. Mocks could not have surfaced this.
+2. `ConcurrentKafkaListenerContainerFactory.setObservationEnabled(true)` is now
+   guarded by a test, since regressing it breaks tracing silently.
+
+**Still unproven:** the consumer half of propagation (that fraud-engine *extracts* the
+header end-to-end), alert-rule evaluation by a live Prometheus, and the
+fault-injection numbers. Those need the full stack from
+`scripts/fault-injection.md`.
 
 ## Risks
 
