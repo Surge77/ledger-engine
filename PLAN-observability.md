@@ -135,6 +135,29 @@ propagation ordinary wiring. Two settings carry the cross-service trace:
 `spring.kafka.listener.observation-enabled` property. Missing that one line produces
 two orphan traces and no error.
 
+### Metric-name audit (2026-07-26, post-merge)
+
+A static audit of every metric referenced by the alert rules found four defects that
+would each have failed **silently** — the alert simply never fires, and nothing logs
+an error:
+
+| Defect | Effect if unfixed |
+|---|---|
+| `LedgerMetrics.transferPosted()` was never called | `ledger_transfers_posted_total` permanently 0 |
+| `ledger.transfer.duration` histogram enabled for a timer that does not exist | dead config; phantom second source of truth for write latency |
+| Alert referenced `fraud_evaluation_duration_seconds_bucket` | real timer is `fraud.pipeline.duration`; rule matched no series |
+| `fraud.pipeline.duration` had no histogram buckets | `histogram_quantile` returns nothing even with the correct name |
+
+All four are fixed. The lesson generalizes: **a metric name is a contract between
+code and alert rules that no compiler checks.** Java errors surface at build time;
+a mistyped PromQL series name produces an alert that looks configured and is inert.
+
+Remaining name assumptions still unverified against a live `/actuator/prometheus`:
+`ledger_outbox_lag`, `ledger_outbox_publish_failures_total`,
+`http_server_requests_seconds_bucket{uri="/transfers"}`. These follow Micrometer's
+documented naming conversion, but conversion rules are not the same as observed
+output — confirm them on first boot.
+
 **What no amount of local work can establish:** that the traceparent header actually
 survives the Kafka hop. That requires a running broker. Until someone runs
 `scripts/fault-injection.md` against the live stack, treat Phase 2 as written but
