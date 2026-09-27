@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # The ledger relies on SERIALIZABLE and FOR UPDATE, so tests need real Postgres (not H2).
+      # Throwaway credentials for an ephemeral CI container, not a real secret.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ledger
+          POSTGRES_PASSWORD: ledger_ci
+          POSTGRES_DB: ledger_engine
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LEDGER_DB_URL: jdbc:postgresql://localhost:5432/ledger_engine
+      LEDGER_DB_USER: ledger
+      LEDGER_DB_PASSWORD: ledger_ci
+      LEDGER_API_KEY: ci-test-key
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # mvnw is committed without the executable bit (created on Windows).
+      - run: chmod +x mvnw
+      - run: ./mvnw -B verify
